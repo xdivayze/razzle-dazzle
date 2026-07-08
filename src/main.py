@@ -6,6 +6,13 @@ from pathlib import Path
 
 CONFIG_BASE_DIR_NAME = "base_directory"
 
+DEFINITIONS_JSON_NAME = "definitions.json"
+DEFINITIONS_ENTRIES_FIELDNAME = "entries"
+
+DATA_CSV_NAME = "data.csv"
+BACKUPS_DIR_NAME = "backups"
+#TODO get specific entry
+#TODO add show backup details
 def add_arguments(parser: argparse.ArgumentParser):
     #positional args
     parser.add_argument("journal_name",nargs="?", default=None, help = "journal name")
@@ -40,12 +47,46 @@ def new_journal(dir: Path, journal_name: str):
     
     dir = dir / journal_name
     os.mkdir(dir)
-    open(dir/"data.csv" , "a").close()
-    open(dir/"prompts.json", "a").close()
+    open(dir/DATA_CSV_NAME , "a").close()
+    open(dir/DEFINITIONS_JSON_NAME, "a").close()
+    os.mkdir(dir/BACKUPS_DIR_NAME)
+
+#definitions.json
+#journal name
+#id: str
+#prompts: [{str, datatype}]
+#entries: [{id, hash, date}]
+#backups: [{id, hash, date}]
+
+#returns journal name, journal id pair
+def list_journals(base_dir: Path)->set[tuple[str, str]]:
+    jpairs: set[tuple[str, str]] = set()
+    for i in base_dir.iterdir():
+        definitions_file = i/DEFINITIONS_JSON_NAME
+        if not definitions_file.exists:
+            continue
+        with open(definitions_file, "r") as f:
+            journal_cfg = json.load(f)
+        jid = journal_cfg.get("id")
+        if not jid:
+            continue
+        jpairs.add((i.name, jid))
+    return jpairs
+
+#returns id, hash, date
+def list_entries(journal_name: str, base_dir: Path)-> set[tuple[str, str, str]]:
+    jdir =base_dir/journal_name
+    if not jdir.exists():
+        raise Exception("journal doesn't exist in the base directory")
     
-    os.mkdir(dir/"backups")
-
-
+    jdir_definitions = jdir/DEFINITIONS_JSON_NAME
+    if not jdir_definitions.exists():
+        raise Exception("journal directory doesn't have definitions file")
+    
+    with open(jdir_definitions, "r") as f:
+        defs = json.load(f)
+    return defs.get(DEFINITIONS_ENTRIES_FIELDNAME);
+    
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
             config = cast(dict[str, object],json.load(config_handle))
@@ -55,7 +96,7 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
         os.mkdir(ndir)
         config[CONFIG_BASE_DIR_NAME] = ndir
     
-    base_dir = config[CONFIG_BASE_DIR_NAME]
+    base_dir = Path(str(config[CONFIG_BASE_DIR_NAME])).resolve()
     
     if args.print_base_directory:
         print(f"BASE DIRECTORY: {base_dir}")
@@ -75,14 +116,17 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
         if args.list_backups:
             pass
         if args.list_entries:
-            pass
+            print(f"LISTING ENTRIES ON JOURNAL: {jname}...\n{list_entries(jname, base_dir)}")
         if args.list_journals:
-            pass
+            print(f"LISTING JOURNALS...\n{list_journals(base_dir)}");
     if args.new:
         pass
 
     json.dump(config, config_handle)
     return str(base_dir)
+
+#config.json
+#base_directory: str
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
