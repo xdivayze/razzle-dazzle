@@ -1,4 +1,5 @@
 import argparse
+import sys
 from typing import IO, cast
 import json
 import os
@@ -14,10 +15,13 @@ DEFINITIONS_PROMPTS_FIELDNAME = "prompts"
 DEFINITIONS_ENTRIES_FIELDNAME = "entries"
 DEFINITIONS_BACKUPS_FIELDNAME = "backups"
 
+TYPES = {"int": int, "float": float, "str": str, "bool": bool}
+
 DATA_CSV_NAME = "data.csv"
 BACKUPS_DIR_NAME = "backups"
 #TODO get specific entry
 #TODO add show backup details
+#TODO add get prompts
 def add_arguments(parser: argparse.ArgumentParser):
     #positional args
     parser.add_argument("journal_name",nargs="?", default=None, help = "journal name")
@@ -53,15 +57,39 @@ def new_journal(dir: Path, journal_name: str):
     dir = dir / journal_name
     os.mkdir(dir)
     open(dir/DATA_CSV_NAME , "a").close()
+    os.mkdir(dir/BACKUPS_DIR_NAME)
+    
+    #question, datatype
+    prompts: list[dict[str, str]] = []
+    while True:
+        nprompt = input("Enter prompt question. Enter END to escape.").strip()
+        if nprompt == "END":
+            break
+
+        if not nprompt:
+            continue
+
+        prompt_t = input("Enter output data type(int, float, str, bool):").strip()
+        if not prompt_t:
+            continue
+
+        if not TYPES.get(prompt_t):
+            print("type invalid, skipping...", file=sys.stderr)
+            continue
+
+        prompts.append({"prompt": nprompt, "dtype":prompt_t})
+        
+
     with open(dir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump({
             DEFINITIONS_NAME_FIELDNAME: journal_name,
             DEFINITIONS_ID_FIELDNAME: uuid.uuid4().hex,
-            DEFINITIONS_PROMPTS_FIELDNAME: [],
+            DEFINITIONS_PROMPTS_FIELDNAME: prompts,
             DEFINITIONS_ENTRIES_FIELDNAME: [],
             DEFINITIONS_BACKUPS_FIELDNAME: [],
         }, f)
-    os.mkdir(dir/BACKUPS_DIR_NAME)
+
+
 
 #definitions.json
 #journal name

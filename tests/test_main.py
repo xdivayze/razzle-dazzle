@@ -3,16 +3,23 @@
 Run with: python -m unittest discover -s tests
 """
 import argparse
+import io
 import json
 import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import main
+
+
+def new_journal_with_input(dir: Path, journal_name: str, responses: list[str]):
+    with patch("builtins.input", side_effect=responses):
+        main.new_journal(dir, journal_name)
 
 
 class TempDirTestCase(unittest.TestCase):
@@ -74,7 +81,7 @@ class TestAddArguments(unittest.TestCase):
 
 class TestNewJournal(TempDirTestCase):
     def test_creates_expected_structure(self):
-        main.new_journal(self.tmpdir, "myjournal")
+        new_journal_with_input(self.tmpdir, "myjournal", ["END"])
         jdir = self.tmpdir / "myjournal"
 
         self.assertTrue(jdir.is_dir())
@@ -83,7 +90,7 @@ class TestNewJournal(TempDirTestCase):
         self.assertTrue((jdir / main.BACKUPS_DIR_NAME).is_dir())
 
     def test_writes_valid_definitions_json(self):
-        main.new_journal(self.tmpdir, "myjournal")
+        new_journal_with_input(self.tmpdir, "myjournal", ["END"])
         jdir = self.tmpdir / "myjournal"
 
         with open(jdir / main.DEFINITIONS_JSON_NAME) as f:
@@ -96,12 +103,12 @@ class TestNewJournal(TempDirTestCase):
         self.assertEqual(defs[main.DEFINITIONS_BACKUPS_FIELDNAME], [])
 
     def test_raises_if_journal_already_exists(self):
-        main.new_journal(self.tmpdir, "myjournal")
+        new_journal_with_input(self.tmpdir, "myjournal", ["END"])
         with self.assertRaises(Exception):
-            main.new_journal(self.tmpdir, "myjournal")
+            new_journal_with_input(self.tmpdir, "myjournal", ["END"])
 
     def test_new_journal_is_immediately_listable(self):
-        main.new_journal(self.tmpdir, "myjournal")
+        new_journal_with_input(self.tmpdir, "myjournal", ["END"])
         jdir = self.tmpdir / "myjournal"
 
         journals = main.list_journals(self.tmpdir)
@@ -109,6 +116,86 @@ class TestNewJournal(TempDirTestCase):
         name, jid = next(iter(journals))
         self.assertEqual(name, "myjournal")
         self.assertTrue(jid)
+
+    def test_immediate_end_records_no_prompts(self):
+        new_journal_with_input(self.tmpdir, "myjournal", ["END"])
+        jdir = self.tmpdir / "myjournal"
+
+        with open(jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        self.assertEqual(defs[main.DEFINITIONS_PROMPTS_FIELDNAME], [])
+
+    def test_valid_prompts_are_recorded_in_order(self):
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["how was your day", "str", "hours slept", "int", "END"],
+        )
+        jdir = self.tmpdir / "myjournal"
+
+        with open(jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        self.assertEqual(
+            defs[main.DEFINITIONS_PROMPTS_FIELDNAME],
+            [
+                {"prompt": "how was your day", "dtype": "str"},
+                {"prompt": "hours slept", "dtype": "int"},
+            ],
+        )
+
+    def test_blank_prompt_question_is_skipped(self):
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["", "how was your day", "str", "END"],
+        )
+        jdir = self.tmpdir / "myjournal"
+
+        with open(jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        self.assertEqual(
+            defs[main.DEFINITIONS_PROMPTS_FIELDNAME],
+            [{"prompt": "how was your day", "dtype": "str"}],
+        )
+
+    def test_blank_datatype_skips_prompt(self):
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["how was your day", "", "END"],
+        )
+        jdir = self.tmpdir / "myjournal"
+
+        with open(jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        self.assertEqual(defs[main.DEFINITIONS_PROMPTS_FIELDNAME], [])
+
+    def test_invalid_datatype_skips_prompt_and_warns(self):
+        stderr = io.StringIO()
+        with patch("sys.stderr", stderr):
+            new_journal_with_input(
+                self.tmpdir, "myjournal",
+                ["how was your day", "bogus", "END"],
+            )
+        jdir = self.tmpdir / "myjournal"
+
+        with open(jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        self.assertEqual(defs[main.DEFINITIONS_PROMPTS_FIELDNAME], [])
+        self.assertIn("invalid", stderr.getvalue().lower())
+
+    def test_valid_datatypes_are_accepted(self):
+        responses = []
+        for dtype in ("int", "float", "str", "bool"):
+            responses += [f"prompt-{dtype}", dtype]
+        responses.append("END")
+
+        new_journal_with_input(self.tmpdir, "myjournal", responses)
+        jdir = self.tmpdir / "myjournal"
+
+        with open(jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        self.assertEqual(
+            [p["dtype"] for p in defs[main.DEFINITIONS_PROMPTS_FIELDNAME]],
+            ["int", "float", "str", "bool"],
+        )
 
         self.assertEqual(main.list_entries(jdir), [])
         self.assertEqual(main.list_backups(jdir), [])
