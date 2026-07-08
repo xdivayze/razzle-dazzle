@@ -1,13 +1,18 @@
 import argparse
-from typing import IO, cast 
+from typing import IO, cast
 import json
-import os 
+import os
+import uuid
 from pathlib import Path
 
 CONFIG_BASE_DIR_NAME = "base_directory"
 
 DEFINITIONS_JSON_NAME = "definitions.json"
+DEFINITIONS_NAME_FIELDNAME = "name"
+DEFINITIONS_ID_FIELDNAME = "id"
+DEFINITIONS_PROMPTS_FIELDNAME = "prompts"
 DEFINITIONS_ENTRIES_FIELDNAME = "entries"
+DEFINITIONS_BACKUPS_FIELDNAME = "backups"
 
 DATA_CSV_NAME = "data.csv"
 BACKUPS_DIR_NAME = "backups"
@@ -48,7 +53,14 @@ def new_journal(dir: Path, journal_name: str):
     dir = dir / journal_name
     os.mkdir(dir)
     open(dir/DATA_CSV_NAME , "a").close()
-    open(dir/DEFINITIONS_JSON_NAME, "a").close()
+    with open(dir/DEFINITIONS_JSON_NAME, "w") as f:
+        json.dump({
+            DEFINITIONS_NAME_FIELDNAME: journal_name,
+            DEFINITIONS_ID_FIELDNAME: uuid.uuid4().hex,
+            DEFINITIONS_PROMPTS_FIELDNAME: [],
+            DEFINITIONS_ENTRIES_FIELDNAME: [],
+            DEFINITIONS_BACKUPS_FIELDNAME: [],
+        }, f)
     os.mkdir(dir/BACKUPS_DIR_NAME)
 
 #definitions.json
@@ -63,29 +75,39 @@ def list_journals(base_dir: Path)->set[tuple[str, str]]:
     jpairs: set[tuple[str, str]] = set()
     for i in base_dir.iterdir():
         definitions_file = i/DEFINITIONS_JSON_NAME
-        if not definitions_file.exists:
+        if not definitions_file.exists():
             continue
         with open(definitions_file, "r") as f:
             journal_cfg = json.load(f)
-        jid = journal_cfg.get("id")
+        jid = journal_cfg.get(DEFINITIONS_ID_FIELDNAME)
         if not jid:
             continue
         jpairs.add((i.name, jid))
     return jpairs
 
 #returns id, hash, date
-def list_entries(journal_name: str, base_dir: Path)-> set[tuple[str, str, str]]:
-    jdir =base_dir/journal_name
-    if not jdir.exists():
-        raise Exception("journal doesn't exist in the base directory")
-    
+def list_entries(jdir: Path)-> set[tuple[str, str, str]]:
     jdir_definitions = jdir/DEFINITIONS_JSON_NAME
     if not jdir_definitions.exists():
         raise Exception("journal directory doesn't have definitions file")
     
     with open(jdir_definitions, "r") as f:
         defs = json.load(f)
+    
     return defs.get(DEFINITIONS_ENTRIES_FIELDNAME);
+
+def list_backups(jdir: Path)->set[tuple[str, str, str]]:
+    jdir_definitions = jdir/DEFINITIONS_JSON_NAME
+    if not jdir_definitions.exists():
+        raise Exception("journal directory doesn't have definitions file")
+    
+    with open(jdir_definitions, "r") as f:
+        defs = json.load(f)
+    return defs.get(DEFINITIONS_BACKUPS_FIELDNAME)
+
+def remove_journal(jdir:Path):
+    os.rmdir(jdir)
+
     
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
@@ -103,6 +125,10 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
 
     jname = args.journal_name
     if jname:
+        jdir =base_dir/jname
+        if not jdir.exists():
+            raise Exception("journal doesn't exist in the base directory")
+
         if args.revert_to_backup:
             pass
         if args.remove_entry:
@@ -112,15 +138,15 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
         if args.new_entry:
             pass
         if args.remove_journal:
-            pass
+            remove_journal(jdir)
         if args.list_backups:
-            pass
+            print(f"LISTING BACKUPS ON JOURNAL: {jname}...\n{list_backups(jdir)}")
         if args.list_entries:
-            print(f"LISTING ENTRIES ON JOURNAL: {jname}...\n{list_entries(jname, base_dir)}")
+            print(f"LISTING ENTRIES ON JOURNAL: {jname}...\n{list_entries(jdir)}")
         if args.list_journals:
             print(f"LISTING JOURNALS...\n{list_journals(base_dir)}");
     if args.new:
-        pass
+        new_journal(base_dir, args.new)
 
     json.dump(config, config_handle)
     return str(base_dir)
