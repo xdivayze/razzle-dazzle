@@ -3,6 +3,8 @@
 Run with: python -m unittest discover -s tests
 """
 import argparse
+import datetime as dt
+import hashlib
 import io
 import json
 import shutil
@@ -272,6 +274,47 @@ class TestRemoveJournal(TempDirTestCase):
         (jdir / "data.csv").touch()
         with self.assertRaises(OSError):
             main.remove_journal(jdir)
+
+
+class TestBackup(TempDirTestCase):
+    def setUp(self):
+        super().setUp()
+        new_journal_with_input(self.tmpdir, "myjournal", ["END"])
+        self.jdir = self.tmpdir / "myjournal"
+        (self.jdir / main.DATA_CSV_NAME).write_text("a,b,c\n1,2,3\n")
+
+    def test_creates_backup_file_with_matching_hash(self):
+        result = main.backup(self.jdir)
+
+        backup_files = list((self.jdir / main.BACKUPS_DIR_NAME).iterdir())
+        self.assertEqual(len(backup_files), 1)
+        backup_file = backup_files[0]
+        self.assertEqual(backup_file.name, f"{result['id']}.csv")
+        self.assertEqual(backup_file.read_text(), "a,b,c\n1,2,3\n")
+
+        expected_hash = hashlib.sha256(backup_file.read_bytes()).hexdigest()
+        self.assertEqual(result["hash"], expected_hash)
+
+    def test_returns_id_hash_and_date(self):
+        result = main.backup(self.jdir)
+        self.assertCountEqual(result.keys(), ["id", "hash", "date"])
+        self.assertTrue(result["id"])
+        self.assertTrue(result["hash"])
+        dt.datetime.fromisoformat(result["date"])
+
+    def test_backup_is_recorded_in_definitions_json(self):
+        result = main.backup(self.jdir)
+        self.assertEqual(main.list_backups(self.jdir), [result])
+
+    def test_multiple_backups_accumulate_with_unique_ids(self):
+        first = main.backup(self.jdir)
+        second = main.backup(self.jdir)
+
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertEqual(main.list_backups(self.jdir), [first, second])
+
+        backup_names = {p.name for p in (self.jdir / main.BACKUPS_DIR_NAME).iterdir()}
+        self.assertEqual(backup_names, {f"{first['id']}.csv", f"{second['id']}.csv"})
 
 
 if __name__ == "__main__":

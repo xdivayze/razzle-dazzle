@@ -1,5 +1,8 @@
 import argparse
 import sys
+import hashlib
+import shutil
+import datetime as dt
 from typing import IO, cast
 import json
 import os
@@ -136,6 +139,24 @@ def list_backups(jdir: Path)->set[tuple[str, str, str]]:
 def remove_journal(jdir:Path):
     os.rmdir(jdir)
 
+def backup (jdir:Path)-> dict[str, str]:
+    backup_id = uuid.uuid4().hex
+    backup_path = jdir/BACKUPS_DIR_NAME/f"{backup_id}.csv"
+    shutil.copy(jdir/DATA_CSV_NAME, backup_path)
+    with open(backup_path, "rb") as f:
+        hashsum = hashlib.file_digest(f, "sha256").hexdigest()
+
+    with open(jdir/DEFINITIONS_JSON_NAME, "r") as f:
+        defs = json.load(f)
+
+    backup_details = {"id": backup_id, "hash": hashsum, "date": dt.datetime.now().isoformat()}
+    defs[DEFINITIONS_BACKUPS_FIELDNAME].append(backup_details)
+
+    with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
+        json.dump(defs, f)
+
+    return backup_details
+    
     
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
@@ -162,7 +183,8 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
         if args.remove_entry:
             pass
         if args.backup:
-            pass
+            defs = backup(jdir)
+            print(f"CREATED NEW BACKUP FOR JOURNAL:{jname}\nid:{defs.get("id")} hash:{defs.get("hash")} date:{defs.get("date")}")
         if args.new_entry:
             pass
         if args.remove_journal:
