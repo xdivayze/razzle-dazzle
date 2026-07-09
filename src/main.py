@@ -157,12 +157,43 @@ def backup (jdir:Path)-> dict[str, str]:
         json.dump(defs, f)
 
     backup_details[DEFINITIONS_ENTRIES_FIELDNAME] = defs[DEFINITIONS_ENTRIES_FIELDNAME]
+    backup_details[DEFINITIONS_PROMPTS_FIELDNAME] = defs[DEFINITIONS_PROMPTS_FIELDNAME]
     with open(jdir/BACKUPS_DIR_NAME/f"{backup_id}.json", "w") as f:
         json.dump(backup_details, f)
  
     return backup_details
     
+def revert_to_backup(backup_id: str, jdir: Path):
+    bdefs = jdir/BACKUPS_DIR_NAME/f"{backup_id}.json"
+    bcsv = jdir/BACKUPS_DIR_NAME/f"{backup_id}.csv"
+    if (not (bdefs).exists()) or (not (bcsv).exists()):
+        raise Exception("backup doesn't exist")
     
+
+
+    with open(bdefs, "r") as f:
+        bdef_json = json.load(f)
+
+    jcsv = jdir/DATA_CSV_NAME
+
+    with open(bcsv, "rb") as f:
+        bhash = hashlib.file_digest(f, "sha256").hexdigest()
+
+    if (bhash != bdef_json["hash"]):
+        raise Exception("corrupted backup file")
+
+    shutil.copy(bcsv, jcsv)
+
+    with open(jdir/DEFINITIONS_JSON_NAME, "r") as f:
+        jdef_json = json.load(f)
+
+    jdef_json[DEFINITIONS_PROMPTS_FIELDNAME] = bdef_json[DEFINITIONS_PROMPTS_FIELDNAME]
+    jdef_json[DEFINITIONS_ENTRIES_FIELDNAME] = bdef_json[DEFINITIONS_ENTRIES_FIELDNAME]
+
+    with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
+        json.dump(jdef_json, f)
+
+
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
             config = cast(dict[str, object],json.load(config_handle))
@@ -184,7 +215,8 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
             raise Exception("journal doesn't exist in the base directory")
 
         if args.revert_to_backup:
-            pass
+            revert_to_backup(args.revert_to_backup.strip(), jdir)
+            print(f"REVERTED JOURNAL {jname} TO {args.revert_to_backup}")
         if args.remove_entry:
             pass
         if args.backup:

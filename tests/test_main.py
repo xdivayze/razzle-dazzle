@@ -293,6 +293,21 @@ class TestBackup(TempDirTestCase):
         with open(defs_path, "w") as f:
             json.dump(defs, f)
 
+    def _set_prompts(self, prompts):
+        defs_path = self.jdir / main.DEFINITIONS_JSON_NAME
+        with open(defs_path) as f:
+            defs = json.load(f)
+        defs[main.DEFINITIONS_PROMPTS_FIELDNAME] = prompts
+        with open(defs_path, "w") as f:
+            json.dump(defs, f)
+
+    @staticmethod
+    def _strip_snapshot_fields(details):
+        return {
+            k: v for k, v in details.items()
+            if k not in (main.DEFINITIONS_ENTRIES_FIELDNAME, main.DEFINITIONS_PROMPTS_FIELDNAME)
+        }
+
     def test_creates_backup_file_with_matching_hash(self):
         result = main.backup(self.jdir)
 
@@ -305,17 +320,18 @@ class TestBackup(TempDirTestCase):
         expected_hash = hashlib.sha256(backup_file.read_bytes()).hexdigest()
         self.assertEqual(result["hash"], expected_hash)
 
-    def test_returns_id_hash_date_and_entries(self):
+    def test_returns_id_hash_date_entries_and_prompts(self):
         result = main.backup(self.jdir)
-        self.assertCountEqual(result.keys(), ["id", "hash", "date", "entries"])
+        self.assertCountEqual(result.keys(), ["id", "hash", "date", "entries", "prompts"])
         self.assertTrue(result["id"])
         self.assertTrue(result["hash"])
         dt.datetime.fromisoformat(result["date"])
         self.assertEqual(result["entries"], [])
+        self.assertEqual(result["prompts"], [])
 
     def test_backup_is_recorded_in_journal_definitions_json(self):
         result = main.backup(self.jdir)
-        expected = {k: v for k, v in result.items() if k != "entries"}
+        expected = self._strip_snapshot_fields(result)
         self.assertEqual(main.list_backups(self.jdir), [expected])
 
     def test_multiple_backups_accumulate_with_unique_ids(self):
@@ -324,8 +340,8 @@ class TestBackup(TempDirTestCase):
 
         self.assertNotEqual(first["id"], second["id"])
         expected = [
-            {k: v for k, v in first.items() if k != "entries"},
-            {k: v for k, v in second.items() if k != "entries"},
+            self._strip_snapshot_fields(first),
+            self._strip_snapshot_fields(second),
         ]
         self.assertEqual(main.list_backups(self.jdir), expected)
 
@@ -355,6 +371,27 @@ class TestBackup(TempDirTestCase):
             backup_defs = json.load(f)
         self.assertEqual(backup_defs["entries"], entries)
 
+    def test_backup_definitions_snapshot_reflects_current_prompts(self):
+        prompts = [{"prompt": "how was your day", "dtype": "str"}]
+        self._set_prompts(prompts)
+
+        result = main.backup(self.jdir)
+        self.assertEqual(result["prompts"], prompts)
+
+        with open(self._backup_defs_path(result["id"])) as f:
+            backup_defs = json.load(f)
+        self.assertEqual(backup_defs["prompts"], prompts)
+
+    def test_journal_definitions_json_prompts_untouched_by_backup(self):
+        prompts = [{"prompt": "how was your day", "dtype": "str"}]
+        self._set_prompts(prompts)
+
+        main.backup(self.jdir)
+
+        with open(self.jdir / main.DEFINITIONS_JSON_NAME) as f:
+            journal_defs = json.load(f)
+        self.assertEqual(journal_defs[main.DEFINITIONS_PROMPTS_FIELDNAME], prompts)
+
     def test_each_backup_gets_its_own_definitions_json(self):
         first = main.backup(self.jdir)
         second = main.backup(self.jdir)
@@ -368,6 +405,99 @@ class TestBackup(TempDirTestCase):
 
         self.assertEqual(first_defs, first)
         self.assertEqual(second_defs, second)
+
+
+class TestRevertToBackup(TempDirTestCase):
+    def setUp(self):
+        super().setUp()
+        new_journal_with_input(self.tmpdir, "myjournal", ["how was your day", "str", "END"])
+        self.jdir = self.tmpdir / "myjournal"
+        (self.jdir / main.DATA_CSV_NAME).write_text("original\n")
+
+        defs_path = self.jdir / main.DEFINITIONS_JSON_NAME
+        with open(defs_path) as f:
+            defs = json.load(f)
+        defs[main.DEFINITIONS_ENTRIES_FIELDNAME] = [{"id": "e1", "hash": "aaa", "date": "2026-01-01"}]
+        with open(defs_path, "w") as f:
+            json.dump(defs, f)
+
+        self.backup_result = main.backup(self.jdir)
+
+    def _mutate_journal(self):
+        (self.jdir / main.DATA_CSV_NAME).write_text("mutated\n")
+        defs_path = self.jdir / main.DEFINITIONS_JSON_NAME
+        with open(defs_path) as f:
+            defs = json.load(f)
+        defs[main.DEFINITIONS_PROMPTS_FIELDNAME] = []
+        defs[main.DEFINITIONS_ENTRIES_FIELDNAME] = []
+        with open(defs_path, "w") as f:
+            json.dump(defs, f)
+
+    def test_raises_if_backup_does_not_exist(self):
+        with self.assertRaises(Exception):
+            main.revert_to_backup("doesnotexist", self.jdir)
+
+    def test_raises_if_backup_csv_missing(self):
+        (self.jdir / main.BACKUPS_DIR_NAME / f"{self.backup_result['id']}.csv").unlink()
+        with self.assertRaises(Exception):
+            main.revert_to_backup(self.backup_result["id"], self.jdir)
+
+    def test_reverts_successfully_when_backup_csv_is_intact(self):
+        self._mutate_journal()
+        main.revert_to_backup(self.backup_result["id"], self.jdir)
+        self.assertEqual((self.jdir / main.DATA_CSV_NAME).read_text(), "original\n")
+
+    def test_raises_if_backup_csv_is_corrupted(self):
+        (self.jdir / main.BACKUPS_DIR_NAME / f"{self.backup_result['id']}.csv").write_text("tampered\n")
+        with self.assertRaises(Exception):
+            main.revert_to_backup(self.backup_result["id"], self.jdir)
+
+    def test_does_not_mutate_journal_when_backup_csv_is_corrupted(self):
+        self._mutate_journal()
+        (self.jdir / main.BACKUPS_DIR_NAME / f"{self.backup_result['id']}.csv").write_text("tampered\n")
+
+        with self.assertRaises(Exception):
+            main.revert_to_backup(self.backup_result["id"], self.jdir)
+
+        self.assertEqual((self.jdir / main.DATA_CSV_NAME).read_text(), "mutated\n")
+        with open(self.jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        self.assertEqual(defs[main.DEFINITIONS_PROMPTS_FIELDNAME], [])
+        self.assertEqual(defs[main.DEFINITIONS_ENTRIES_FIELDNAME], [])
+
+    def test_raises_if_backup_json_missing(self):
+        (self.jdir / main.BACKUPS_DIR_NAME / f"{self.backup_result['id']}.json").unlink()
+        with self.assertRaises(Exception):
+            main.revert_to_backup(self.backup_result["id"], self.jdir)
+
+    def test_restores_data_csv(self):
+        self._mutate_journal()
+        main.revert_to_backup(self.backup_result["id"], self.jdir)
+        self.assertEqual((self.jdir / main.DATA_CSV_NAME).read_text(), "original\n")
+
+    def test_restores_prompts_and_entries(self):
+        self._mutate_journal()
+        main.revert_to_backup(self.backup_result["id"], self.jdir)
+
+        with open(self.jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        self.assertEqual(defs[main.DEFINITIONS_PROMPTS_FIELDNAME], self.backup_result["prompts"])
+        self.assertEqual(defs[main.DEFINITIONS_ENTRIES_FIELDNAME], self.backup_result["entries"])
+
+    def test_leaves_name_id_and_backups_list_untouched(self):
+        defs_path = self.jdir / main.DEFINITIONS_JSON_NAME
+        with open(defs_path) as f:
+            before = json.load(f)
+
+        self._mutate_journal()
+        main.revert_to_backup(self.backup_result["id"], self.jdir)
+
+        with open(defs_path) as f:
+            after = json.load(f)
+
+        self.assertEqual(after[main.DEFINITIONS_NAME_FIELDNAME], before[main.DEFINITIONS_NAME_FIELDNAME])
+        self.assertEqual(after[main.DEFINITIONS_ID_FIELDNAME], before[main.DEFINITIONS_ID_FIELDNAME])
+        self.assertEqual(after[main.DEFINITIONS_BACKUPS_FIELDNAME], before[main.DEFINITIONS_BACKUPS_FIELDNAME])
 
 
 if __name__ == "__main__":
