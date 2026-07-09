@@ -152,9 +152,14 @@ def backup (jdir:Path)-> dict[str, str]:
     backup_details = {"id": backup_id, "hash": hashsum, "date": dt.datetime.now().isoformat()}
     defs[DEFINITIONS_BACKUPS_FIELDNAME].append(backup_details)
 
+
     with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump(defs, f)
 
+    backup_details[DEFINITIONS_ENTRIES_FIELDNAME] = defs[DEFINITIONS_ENTRIES_FIELDNAME]
+    with open(jdir/BACKUPS_DIR_NAME/f"{backup_id}.json", "w") as f:
+        json.dump(backup_details, f)
+ 
     return backup_details
     
     

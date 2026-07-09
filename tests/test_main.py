@@ -111,7 +111,6 @@ class TestNewJournal(TempDirTestCase):
 
     def test_new_journal_is_immediately_listable(self):
         new_journal_with_input(self.tmpdir, "myjournal", ["END"])
-        jdir = self.tmpdir / "myjournal"
 
         journals = main.list_journals(self.tmpdir)
         self.assertEqual(len(journals), 1)
@@ -283,10 +282,21 @@ class TestBackup(TempDirTestCase):
         self.jdir = self.tmpdir / "myjournal"
         (self.jdir / main.DATA_CSV_NAME).write_text("a,b,c\n1,2,3\n")
 
+    def _backup_csv_files(self):
+        return [p for p in (self.jdir / main.BACKUPS_DIR_NAME).iterdir() if p.suffix == ".csv"]
+
+    def _set_entries(self, entries):
+        defs_path = self.jdir / main.DEFINITIONS_JSON_NAME
+        with open(defs_path) as f:
+            defs = json.load(f)
+        defs[main.DEFINITIONS_ENTRIES_FIELDNAME] = entries
+        with open(defs_path, "w") as f:
+            json.dump(defs, f)
+
     def test_creates_backup_file_with_matching_hash(self):
         result = main.backup(self.jdir)
 
-        backup_files = list((self.jdir / main.BACKUPS_DIR_NAME).iterdir())
+        backup_files = self._backup_csv_files()
         self.assertEqual(len(backup_files), 1)
         backup_file = backup_files[0]
         self.assertEqual(backup_file.name, f"{result['id']}.csv")
@@ -295,26 +305,69 @@ class TestBackup(TempDirTestCase):
         expected_hash = hashlib.sha256(backup_file.read_bytes()).hexdigest()
         self.assertEqual(result["hash"], expected_hash)
 
-    def test_returns_id_hash_and_date(self):
+    def test_returns_id_hash_date_and_entries(self):
         result = main.backup(self.jdir)
-        self.assertCountEqual(result.keys(), ["id", "hash", "date"])
+        self.assertCountEqual(result.keys(), ["id", "hash", "date", "entries"])
         self.assertTrue(result["id"])
         self.assertTrue(result["hash"])
         dt.datetime.fromisoformat(result["date"])
+        self.assertEqual(result["entries"], [])
 
-    def test_backup_is_recorded_in_definitions_json(self):
+    def test_backup_is_recorded_in_journal_definitions_json(self):
         result = main.backup(self.jdir)
-        self.assertEqual(main.list_backups(self.jdir), [result])
+        expected = {k: v for k, v in result.items() if k != "entries"}
+        self.assertEqual(main.list_backups(self.jdir), [expected])
 
     def test_multiple_backups_accumulate_with_unique_ids(self):
         first = main.backup(self.jdir)
         second = main.backup(self.jdir)
 
         self.assertNotEqual(first["id"], second["id"])
-        self.assertEqual(main.list_backups(self.jdir), [first, second])
+        expected = [
+            {k: v for k, v in first.items() if k != "entries"},
+            {k: v for k, v in second.items() if k != "entries"},
+        ]
+        self.assertEqual(main.list_backups(self.jdir), expected)
 
-        backup_names = {p.name for p in (self.jdir / main.BACKUPS_DIR_NAME).iterdir()}
+        backup_names = {p.name for p in self._backup_csv_files()}
         self.assertEqual(backup_names, {f"{first['id']}.csv", f"{second['id']}.csv"})
+
+    def _backup_defs_path(self, backup_id: str) -> Path:
+        return self.jdir / main.BACKUPS_DIR_NAME / f"{backup_id}.json"
+
+    def test_writes_a_definitions_json_per_backup(self):
+        result = main.backup(self.jdir)
+
+        backup_defs_path = self._backup_defs_path(result["id"])
+        self.assertTrue(backup_defs_path.is_file())
+        with open(backup_defs_path) as f:
+            backup_defs = json.load(f)
+        self.assertEqual(backup_defs, result)
+
+    def test_backup_definitions_snapshot_reflects_current_entries(self):
+        entries = [{"id": "e1", "hash": "aaa", "date": "2026-01-01"}]
+        self._set_entries(entries)
+
+        result = main.backup(self.jdir)
+        self.assertEqual(result["entries"], entries)
+
+        with open(self._backup_defs_path(result["id"])) as f:
+            backup_defs = json.load(f)
+        self.assertEqual(backup_defs["entries"], entries)
+
+    def test_each_backup_gets_its_own_definitions_json(self):
+        first = main.backup(self.jdir)
+        second = main.backup(self.jdir)
+
+        self.assertNotEqual(first["id"], second["id"])
+
+        with open(self._backup_defs_path(first["id"])) as f:
+            first_defs = json.load(f)
+        with open(self._backup_defs_path(second["id"])) as f:
+            second_defs = json.load(f)
+
+        self.assertEqual(first_defs, first)
+        self.assertEqual(second_defs, second)
 
 
 if __name__ == "__main__":
