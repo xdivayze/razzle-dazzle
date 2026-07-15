@@ -116,7 +116,7 @@ class TestNewJournal(TempDirTestCase):
 
         with open(jdir / main.DATA_CSV_NAME, newline="") as f:
             rows = list(csv.reader(f))
-        self.assertEqual(rows, [["id"]])
+        self.assertEqual(rows, [["id", "date"]])
 
     def test_writes_csv_header_row_with_prompts(self):
         new_journal_with_input(
@@ -127,7 +127,7 @@ class TestNewJournal(TempDirTestCase):
 
         with open(jdir / main.DATA_CSV_NAME, newline="") as f:
             rows = list(csv.reader(f))
-        self.assertEqual(rows, [["id", "how was your day", "hours slept"]])
+        self.assertEqual(rows, [["id", "date", "how was your day", "hours slept"]])
 
     def test_new_journal_is_immediately_listable(self):
         new_journal_with_input(self.tmpdir, "myjournal", ["END"])
@@ -549,14 +549,15 @@ class TestNewEntry(TempDirTestCase):
         with open(self.jdir / main.DATA_CSV_NAME, newline="") as f:
             return list(csv.reader(f))
 
-    def test_appends_a_row_with_a_generated_id_and_answers(self):
+    def test_appends_a_row_with_a_generated_id_date_and_answers(self):
         new_entry_with_input(self.jdir, ["good day", "8"])
 
         rows = self._csv_rows()
         self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0], ["id", "how was your day", "hours slept"])
-        self.assertEqual(rows[1][1:], ["good day", "8"])
+        self.assertEqual(rows[0], ["id", "date", "how was your day", "hours slept"])
+        self.assertEqual(rows[1][2:], ["good day", "8"])
         self.assertTrue(rows[1][0])
+        dt.datetime.fromisoformat(rows[1][1])
 
     def test_records_entry_in_definitions_json(self):
         new_entry_with_input(self.jdir, ["good day", "8"])
@@ -568,6 +569,7 @@ class TestNewEntry(TempDirTestCase):
 
         rows = self._csv_rows()
         self.assertEqual(entries[0]["id"], rows[1][0])
+        self.assertEqual(entries[0]["date"], rows[1][1])
 
     def test_multiple_entries_accumulate_with_unique_ids(self):
         new_entry_with_input(self.jdir, ["good day", "8"])
@@ -589,7 +591,7 @@ class TestNewEntry(TempDirTestCase):
             new_entry_with_input(self.jdir, ["good day", "not-a-number"])
 
         rows = self._csv_rows()
-        self.assertEqual(rows, [["id", "how was your day", "hours slept"]])
+        self.assertEqual(rows, [["id", "date", "how was your day", "hours slept"]])
         self.assertEqual(main.list_entries(self.jdir), [])
 
     def test_journal_with_no_prompts_records_id_only_row(self):
@@ -654,14 +656,14 @@ class TestRemoveEntry(TempDirTestCase):
         main.remove_entry(self.jdir, self.first_id)
 
         rows = self._csv_rows()
-        self.assertEqual(rows[0], ["id", "how was your day"])
-        self.assertEqual(rows[1][1], "bad day")
+        self.assertEqual(rows[0], ["id", "date", "how was your day"])
+        self.assertEqual(rows[1][2], "bad day")
 
     def test_removing_last_entry_leaves_header_only_csv(self):
         main.remove_entry(self.jdir, self.first_id)
         main.remove_entry(self.jdir, self.second_id)
 
-        self.assertEqual(self._csv_rows(), [["id", "how was your day"]])
+        self.assertEqual(self._csv_rows(), [["id", "date", "how was your day"]])
         self.assertEqual(main.list_entries(self.jdir), [])
 
     def test_removes_row_with_purely_numeric_id(self):

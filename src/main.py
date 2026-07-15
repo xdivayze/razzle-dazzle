@@ -24,10 +24,7 @@ TYPES = {"int": int, "float": float, "str": str, "bool": bool}
 
 DATA_CSV_NAME = "data.csv"
 BACKUPS_DIR_NAME = "backups"
-#TODO get specific entry
 #TODO add show backup details
-#TODO add get prompts
-#TODO add add new prompt
 def add_arguments(parser: argparse.ArgumentParser):
     #positional args
     parser.add_argument("journal_name",nargs="?", default=None, help = "journal name")
@@ -37,12 +34,15 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--backup", action="store_true", help="create a back up of the provided journal")
     parser.add_argument("--new-entry", action="store_true", help="insert a new entry to the journal")
     parser.add_argument("--remove-journal", action="store_true", help="remove the specified journal and delete its contents")
-    
+    parser.add_argument("--add-prompt", action="store_true", help="prompts user to add a new prompt to the journal")
+
     #prints stuff
     parser.add_argument("--list-backups", action="store_true", help="list the backups for journal")
     parser.add_argument("--list-entries", action="store_true", help="list entries for journal")
     parser.add_argument("--list-journals", action="store_true", help="lists the journals in the current base directory")
     parser.add_argument("--print-base-directory", action="store_true", help="print the current base directory")
+    parser.add_argument("--list-prompts", action="store_true", help="prints the prompts and data types associated")
+    
 
     #field args
     #no journal name required
@@ -52,6 +52,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     #journal name required
     parser.add_argument("--remove-entry", metavar="ENTRY IDENTIFIER", type=str, help="remove the specified entry from the chosen journal")
     parser.add_argument("--revert-to-backup", metavar="BACKUP IDENTIFIER", type=str, help="revert to specified backup")
+    parser.add_argument("--get-entry", metavar="ENTRY ID", type=str, help="print details of the specific entry")
 
 def new_journal(dir: Path, journal_name: str):
     dir = dir.resolve();
@@ -86,7 +87,7 @@ def new_journal(dir: Path, journal_name: str):
 
     with open(dir/DATA_CSV_NAME, "w", newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["id"] + [p["prompt"] for p in prompts])
+        writer.writerow(["id", "date"] + [p["prompt"] for p in prompts])
 
     with open(dir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump({
@@ -199,7 +200,7 @@ def revert_to_backup(backup_id: str, jdir: Path):
         json.dump(jdef_json, f)
 
 #data.csv has the following structure
-#id, [...data]
+#id, date, [...data]
 
 # start a sequence of prompts to fulfill a new entry
 def new_entry(jdir: Path):
@@ -226,12 +227,14 @@ def new_entry(jdir: Path):
         if f.read(1) != b'\n':
             f.write(b'\n')
     entry_id = uuid.uuid4().hex
+    entry_date = dt.datetime.now().isoformat()
+    answers.insert(0, entry_date)
     answers.insert(0, entry_id)
     with open(jdir/ DATA_CSV_NAME, "a", newline='') as f:
         writer = csv.writer(f)
         writer.writerow(answers)
-    
-    jdef_json[DEFINITIONS_ENTRIES_FIELDNAME].append({"id":entry_id, "date":dt.datetime.now().isoformat()})
+
+    jdef_json[DEFINITIONS_ENTRIES_FIELDNAME].append({"id":entry_id, "date":entry_date})
     
     with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump(jdef_json, f)
@@ -251,6 +254,10 @@ def remove_entry(jdir: Path, id: str):
     jdef[DEFINITIONS_ENTRIES_FIELDNAME] = [item for item in entries if item["id"] != id]
     with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump(jdef, f)
+
+def get_entry(jdir: Path, id: str):
+    raise NotImplementedError
+
 
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
@@ -292,6 +299,12 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
             print(f"LISTING ENTRIES ON JOURNAL: {jname}...\n{list_entries(jdir)}")
         if args.list_journals:
             print(f"LISTING JOURNALS...\n{list_journals(base_dir)}");
+        if args.get_entry:
+            pass #TODO
+        if args.list_prompts:
+            pass #TODO
+        if args.add_prompt:
+            pass #TODO
     if args.new:
         new_journal(base_dir, args.new)
 
