@@ -1,3 +1,4 @@
+import csv
 import argparse
 import sys
 import hashlib
@@ -25,6 +26,7 @@ BACKUPS_DIR_NAME = "backups"
 #TODO get specific entry
 #TODO add show backup details
 #TODO add get prompts
+#TODO add add new prompt
 def add_arguments(parser: argparse.ArgumentParser):
     #positional args
     parser.add_argument("journal_name",nargs="?", default=None, help = "journal name")
@@ -50,18 +52,16 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--remove-entry", metavar="ENTRY IDENTIFIER", type=str, help="remove the specified entry from the chosen journal")
     parser.add_argument("--revert-to-backup", metavar="BACKUP IDENTIFIER", type=str, help="revert to specified backup")
 
-
 def new_journal(dir: Path, journal_name: str):
     dir = dir.resolve();
-    
+
     if (os.listdir(dir).count(journal_name)):
         raise Exception( "Journal already exists. Aborting...")
-    
+
     dir = dir / journal_name
     os.mkdir(dir)
-    open(dir/DATA_CSV_NAME , "a").close()
     os.mkdir(dir/BACKUPS_DIR_NAME)
-    
+
     #question, datatype
     prompts: list[dict[str, str]] = []
     while True:
@@ -81,7 +81,11 @@ def new_journal(dir: Path, journal_name: str):
             continue
 
         prompts.append({"prompt": nprompt, "dtype":prompt_t})
-        
+
+
+    with open(dir/DATA_CSV_NAME, "w", newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["id"] + [p["prompt"] for p in prompts])
 
     with open(dir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump({
@@ -98,12 +102,12 @@ def new_journal(dir: Path, journal_name: str):
 #journal name
 #id: str
 #prompts: [{str, datatype}]
-#entries: [{id, hash, date}]
+#entries: [{id, date}]
 #backups: [{id, hash, date}]
 
 #returns journal name, journal id pair
-def list_journals(base_dir: Path)->set[tuple[str, str]]:
-    jpairs: set[tuple[str, str]] = set()
+def list_journals(base_dir: Path)->list[tuple[str, str]]:
+    jpairs: list[tuple[str, str]] = list()
     for i in base_dir.iterdir():
         definitions_file = i/DEFINITIONS_JSON_NAME
         if not definitions_file.exists():
@@ -113,11 +117,11 @@ def list_journals(base_dir: Path)->set[tuple[str, str]]:
         jid = journal_cfg.get(DEFINITIONS_ID_FIELDNAME)
         if not jid:
             continue
-        jpairs.add((i.name, jid))
+        jpairs.append((i.name, jid))
     return jpairs
 
-#returns id, hash, date
-def list_entries(jdir: Path)-> set[tuple[str, str, str]]:
+#returns id, date
+def list_entries(jdir: Path)-> list[dict[str, str]]:
     jdir_definitions = jdir/DEFINITIONS_JSON_NAME
     if not jdir_definitions.exists():
         raise Exception("journal directory doesn't have definitions file")
@@ -127,7 +131,7 @@ def list_entries(jdir: Path)-> set[tuple[str, str, str]]:
     
     return defs.get(DEFINITIONS_ENTRIES_FIELDNAME);
 
-def list_backups(jdir: Path)->set[tuple[str, str, str]]:
+def list_backups(jdir: Path)->list[dict[str, str]]:
     jdir_definitions = jdir/DEFINITIONS_JSON_NAME
     if not jdir_definitions.exists():
         raise Exception("journal directory doesn't have definitions file")
@@ -193,6 +197,45 @@ def revert_to_backup(backup_id: str, jdir: Path):
     with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump(jdef_json, f)
 
+#data.csv has the following structure
+#id, [...data]
+
+# start a sequence of prompts to fulfill a new entry
+def new_entry(jdir: Path):
+    with open(jdir/DEFINITIONS_JSON_NAME, "r") as f:
+        jdef_json = json.load(f)
+
+    prompts: list[dict[str, str]] = jdef_json.get(DEFINITIONS_PROMPTS_FIELDNAME)
+    answers: list[str] = list()
+    for prompt_entry in prompts:
+        p = prompt_entry["prompt"]
+        dtype = prompt_entry["dtype"]
+        ans = input(p).strip()
+        dtype_found = TYPES.get(dtype)
+        if not dtype_found:
+            raise TypeError("prompt answer type not allowed")
+        try:
+            dtype_found(ans)
+        except(ValueError, TypeError):
+            raise TypeError("prompt answer of wrong data type")
+        answers.append(ans)
+
+    with open(jdir/DATA_CSV_NAME, "rb+") as f:
+        f.seek(-1, 2)
+        if f.read(1) != b'\n':
+            f.write(b'\n')
+    entry_id = uuid.uuid4().hex
+    answers.insert(0, entry_id)
+    with open(jdir/ DATA_CSV_NAME, "a", newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(answers)
+    
+    jdef_json[DEFINITIONS_ENTRIES_FIELDNAME].append({"id":entry_id, "date":dt.datetime.now().isoformat()})
+    
+    with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
+        json.dump(jdef_json, f)
+
+        
 
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
@@ -223,7 +266,8 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
             defs = backup(jdir)
             print(f"CREATED NEW BACKUP FOR JOURNAL:{jname}\nid:{defs.get("id")} hash:{defs.get("hash")} date:{defs.get("date")}")
         if args.new_entry:
-            pass
+            new_entry(jdir)
+            print(f"ADDED NEW ENTRY TO JOURNAL: {jname}")
         if args.remove_journal:
             remove_journal(jdir)
         if args.list_backups:

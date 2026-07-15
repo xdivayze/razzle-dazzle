@@ -3,6 +3,7 @@
 Run with: python -m unittest discover -s tests
 """
 import argparse
+import csv
 import datetime as dt
 import hashlib
 import io
@@ -109,6 +110,25 @@ class TestNewJournal(TempDirTestCase):
         with self.assertRaises(Exception):
             new_journal_with_input(self.tmpdir, "myjournal", ["END"])
 
+    def test_writes_csv_header_row_with_no_prompts(self):
+        new_journal_with_input(self.tmpdir, "myjournal", ["END"])
+        jdir = self.tmpdir / "myjournal"
+
+        with open(jdir / main.DATA_CSV_NAME, newline="") as f:
+            rows = list(csv.reader(f))
+        self.assertEqual(rows, [["id"]])
+
+    def test_writes_csv_header_row_with_prompts(self):
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["how was your day", "str", "hours slept", "int", "END"],
+        )
+        jdir = self.tmpdir / "myjournal"
+
+        with open(jdir / main.DATA_CSV_NAME, newline="") as f:
+            rows = list(csv.reader(f))
+        self.assertEqual(rows, [["id", "how was your day", "hours slept"]])
+
     def test_new_journal_is_immediately_listable(self):
         new_journal_with_input(self.tmpdir, "myjournal", ["END"])
 
@@ -208,24 +228,25 @@ class TestListJournals(TempDirTestCase):
         with open(jdir / main.DEFINITIONS_JSON_NAME, "w") as f:
             json.dump(data, f)
 
-    def test_empty_base_dir_returns_empty_set(self):
-        self.assertEqual(main.list_journals(self.tmpdir), set())
+    def test_empty_base_dir_returns_empty_list(self):
+        result = main.list_journals(self.tmpdir)
+        self.assertIsInstance(result, list)
+        self.assertEqual(result, [])
 
     def test_skips_dirs_without_definitions_file(self):
         (self.tmpdir / "not_a_journal").mkdir()
-        self.assertEqual(main.list_journals(self.tmpdir), set())
+        self.assertEqual(main.list_journals(self.tmpdir), [])
 
     def test_skips_journals_without_id_field(self):
         self._write_definitions(self.tmpdir / "no_id", {})
-        self.assertEqual(main.list_journals(self.tmpdir), set())
+        self.assertEqual(main.list_journals(self.tmpdir), [])
 
     def test_returns_name_id_pairs(self):
         self._write_definitions(self.tmpdir / "j1", {"id": "abc123"})
         self._write_definitions(self.tmpdir / "j2", {"id": "def456"})
-        self.assertEqual(
-            main.list_journals(self.tmpdir),
-            {("j1", "abc123"), ("j2", "def456")},
-        )
+        result = main.list_journals(self.tmpdir)
+        self.assertIsInstance(result, list)
+        self.assertCountEqual(result, [("j1", "abc123"), ("j2", "def456")])
 
 
 class TestListEntries(TempDirTestCase):
@@ -238,10 +259,15 @@ class TestListEntries(TempDirTestCase):
     def test_returns_entries_field(self):
         jdir = self.tmpdir / "myjournal"
         jdir.mkdir()
-        entries = [{"id": "1", "hash": "aaa", "date": "2026-01-01"}]
+        entries = [{"id": "1", "date": "2026-01-01"}]
         with open(jdir / main.DEFINITIONS_JSON_NAME, "w") as f:
             json.dump({main.DEFINITIONS_ENTRIES_FIELDNAME: entries}, f)
-        self.assertEqual(main.list_entries(jdir), entries)
+        result = main.list_entries(jdir)
+        self.assertIsInstance(result, list)
+        self.assertEqual(result, entries)
+        for entry in result:
+            self.assertIsInstance(entry, dict)
+            self.assertCountEqual(entry.keys(), ["id", "date"])
 
 
 class TestListBackups(TempDirTestCase):
@@ -257,7 +283,12 @@ class TestListBackups(TempDirTestCase):
         backups = [{"id": "1", "hash": "bbb", "date": "2026-01-01"}]
         with open(jdir / main.DEFINITIONS_JSON_NAME, "w") as f:
             json.dump({main.DEFINITIONS_BACKUPS_FIELDNAME: backups}, f)
-        self.assertEqual(main.list_backups(jdir), backups)
+        result = main.list_backups(jdir)
+        self.assertIsInstance(result, list)
+        self.assertEqual(result, backups)
+        for entry in result:
+            self.assertIsInstance(entry, dict)
+            self.assertCountEqual(entry.keys(), ["id", "hash", "date"])
 
 
 class TestRemoveJournal(TempDirTestCase):
@@ -361,7 +392,7 @@ class TestBackup(TempDirTestCase):
         self.assertEqual(backup_defs, result)
 
     def test_backup_definitions_snapshot_reflects_current_entries(self):
-        entries = [{"id": "e1", "hash": "aaa", "date": "2026-01-01"}]
+        entries = [{"id": "e1", "date": "2026-01-01"}]
         self._set_entries(entries)
 
         result = main.backup(self.jdir)
@@ -417,7 +448,7 @@ class TestRevertToBackup(TempDirTestCase):
         defs_path = self.jdir / main.DEFINITIONS_JSON_NAME
         with open(defs_path) as f:
             defs = json.load(f)
-        defs[main.DEFINITIONS_ENTRIES_FIELDNAME] = [{"id": "e1", "hash": "aaa", "date": "2026-01-01"}]
+        defs[main.DEFINITIONS_ENTRIES_FIELDNAME] = [{"id": "e1", "date": "2026-01-01"}]
         with open(defs_path, "w") as f:
             json.dump(defs, f)
 
@@ -498,6 +529,79 @@ class TestRevertToBackup(TempDirTestCase):
         self.assertEqual(after[main.DEFINITIONS_NAME_FIELDNAME], before[main.DEFINITIONS_NAME_FIELDNAME])
         self.assertEqual(after[main.DEFINITIONS_ID_FIELDNAME], before[main.DEFINITIONS_ID_FIELDNAME])
         self.assertEqual(after[main.DEFINITIONS_BACKUPS_FIELDNAME], before[main.DEFINITIONS_BACKUPS_FIELDNAME])
+
+
+def new_entry_with_input(jdir: Path, responses: list[str]):
+    with patch("builtins.input", side_effect=responses):
+        main.new_entry(jdir)
+
+
+class TestNewEntry(TempDirTestCase):
+    def setUp(self):
+        super().setUp()
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["how was your day", "str", "hours slept", "int", "END"],
+        )
+        self.jdir = self.tmpdir / "myjournal"
+
+    def _csv_rows(self):
+        with open(self.jdir / main.DATA_CSV_NAME, newline="") as f:
+            return list(csv.reader(f))
+
+    def test_appends_a_row_with_a_generated_id_and_answers(self):
+        new_entry_with_input(self.jdir, ["good day", "8"])
+
+        rows = self._csv_rows()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0], ["id", "how was your day", "hours slept"])
+        self.assertEqual(rows[1][1:], ["good day", "8"])
+        self.assertTrue(rows[1][0])
+
+    def test_records_entry_in_definitions_json(self):
+        new_entry_with_input(self.jdir, ["good day", "8"])
+
+        entries = main.list_entries(self.jdir)
+        self.assertEqual(len(entries), 1)
+        self.assertCountEqual(entries[0].keys(), ["id", "date"])
+        dt.datetime.fromisoformat(entries[0]["date"])
+
+        rows = self._csv_rows()
+        self.assertEqual(entries[0]["id"], rows[1][0])
+
+    def test_multiple_entries_accumulate_with_unique_ids(self):
+        new_entry_with_input(self.jdir, ["good day", "8"])
+        new_entry_with_input(self.jdir, ["bad day", "3"])
+
+        rows = self._csv_rows()
+        self.assertEqual(len(rows), 3)
+        self.assertNotEqual(rows[1][0], rows[2][0])
+
+        entries = main.list_entries(self.jdir)
+        self.assertEqual([e["id"] for e in entries], [rows[1][0], rows[2][0]])
+
+    def test_raises_on_invalid_int_answer(self):
+        with self.assertRaises(TypeError):
+            new_entry_with_input(self.jdir, ["good day", "not-a-number"])
+
+    def test_does_not_write_row_or_entry_on_invalid_answer(self):
+        with self.assertRaises(TypeError):
+            new_entry_with_input(self.jdir, ["good day", "not-a-number"])
+
+        rows = self._csv_rows()
+        self.assertEqual(rows, [["id", "how was your day", "hours slept"]])
+        self.assertEqual(main.list_entries(self.jdir), [])
+
+    def test_journal_with_no_prompts_records_id_only_row(self):
+        new_journal_with_input(self.tmpdir, "noprompts", ["END"])
+        jdir = self.tmpdir / "noprompts"
+
+        new_entry_with_input(jdir, [])
+
+        with open(jdir / main.DATA_CSV_NAME, newline="") as f:
+            rows = list(csv.reader(f))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][0], main.list_entries(jdir)[0]["id"])
 
 
 if __name__ == "__main__":
