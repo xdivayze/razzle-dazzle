@@ -281,6 +281,42 @@ def list_prompts(jdir: Path)->list[dict[str, str]]:
 
     return jdef.get(DEFINITIONS_PROMPTS_FIELDNAME)
 
+def add_prompt(jdir:Path):
+    prompts: list[dict[str, str]] = []
+    while True:
+        nprompt = input("Enter prompt question. Enter END to escape.").strip()
+        if nprompt == "END":
+            break
+
+        if not nprompt:
+            continue
+
+        prompt_t = input("Enter output data type(int, float, str, bool):").strip()
+        if not prompt_t:
+            continue
+
+        if not TYPES.get(prompt_t):
+            print("type invalid, skipping...", file=sys.stderr)
+            continue
+
+        prompts.append({"prompt": nprompt, "dtype":prompt_t})
+
+    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={"id": str})
+
+    for p in prompts:
+        prompt = p["prompt"]
+        df[prompt] = pd.NA
+
+    df.to_csv(jdir/DATA_CSV_NAME, index=False)
+
+    with open(jdir/DEFINITIONS_JSON_NAME, "r") as f:
+        jdef = json.load(f)
+    jdef[DEFINITIONS_PROMPTS_FIELDNAME].extend(prompts)
+    with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
+        json.dump(jdef, f)
+    
+
+
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
             config = cast(dict[str, object],json.load(config_handle))
@@ -326,7 +362,8 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
         if args.list_prompts:
             print(f"LISTING PROMPTS ON JOURNAL: {jname}...\n{list_prompts(jdir)}")
         if args.add_prompt:
-            pass #TODO
+            add_prompt(jdir)
+            print(f"ADDED PROMPT TO JOURNAL {jname}")
     if args.new:
         new_journal(base_dir, args.new)
 

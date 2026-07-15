@@ -801,5 +801,75 @@ class TestGetEntry(TempDirTestCase):
             main.get_entry(self.jdir, self.first["id"])
 
 
+def add_prompt_with_input(jdir: Path, responses: list[str]):
+    with patch("builtins.input", side_effect=responses):
+        main.add_prompt(jdir)
+
+
+class TestAddPrompt(TempDirTestCase):
+    def setUp(self):
+        super().setUp()
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["how was your day", "str", "END"],
+        )
+        self.jdir = self.tmpdir / "myjournal"
+        new_entry_with_input(self.jdir, ["good day"])
+
+    def _csv_rows(self):
+        with open(self.jdir / main.DATA_CSV_NAME, newline="") as f:
+            return list(csv.reader(f))
+
+    def test_appends_new_prompt_to_definitions_json(self):
+        add_prompt_with_input(self.jdir, ["mood", "str", "END"])
+
+        self.assertEqual(
+            main.list_prompts(self.jdir),
+            [
+                {"prompt": "how was your day", "dtype": "str"},
+                {"prompt": "mood", "dtype": "str"},
+            ],
+        )
+
+    def test_preserves_existing_prompts_across_multiple_calls(self):
+        add_prompt_with_input(self.jdir, ["mood", "str", "END"])
+        add_prompt_with_input(self.jdir, ["energy", "int", "END"])
+
+        self.assertEqual(
+            [p["prompt"] for p in main.list_prompts(self.jdir)],
+            ["how was your day", "mood", "energy"],
+        )
+
+    def test_adds_csv_column_without_extra_index_column(self):
+        add_prompt_with_input(self.jdir, ["mood", "str", "END"])
+
+        rows = self._csv_rows()
+        self.assertEqual(rows[0], ["id", "date", "how was your day", "mood"])
+
+    def test_existing_rows_get_blank_value_for_new_column(self):
+        add_prompt_with_input(self.jdir, ["mood", "str", "END"])
+
+        rows = self._csv_rows()
+        self.assertEqual(len(rows[1]), 4)
+        self.assertEqual(rows[1][3], "")
+
+    def test_no_new_prompts_leaves_prompts_and_csv_intact(self):
+        prompts_before = main.list_prompts(self.jdir)
+        rows_before = self._csv_rows()
+
+        add_prompt_with_input(self.jdir, ["END"])
+
+        self.assertEqual(main.list_prompts(self.jdir), prompts_before)
+        self.assertEqual(self._csv_rows(), rows_before)
+
+    def test_new_entry_after_add_prompt_stays_column_aligned(self):
+        add_prompt_with_input(self.jdir, ["mood", "str", "END"])
+        new_entry_with_input(self.jdir, ["bad day", "grumpy"])
+
+        rows = self._csv_rows()
+        self.assertEqual(rows[0], ["id", "date", "how was your day", "mood"])
+        self.assertEqual(rows[2][2:], ["bad day", "grumpy"])
+
+
 if __name__ == "__main__":
     unittest.main()
