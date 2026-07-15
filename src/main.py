@@ -150,7 +150,7 @@ def list_backups(jdir: Path)->list[dict[str, str]]:
     return defs.get(DEFINITIONS_BACKUPS_FIELDNAME)
 
 def remove_journal(jdir:Path):
-    os.rmdir(jdir)
+    shutil.rmtree(jdir)
 
 def backup (jdir:Path)-> dict[str, str]:
     backup_id = uuid.uuid4().hex
@@ -327,16 +327,18 @@ def add_prompt(jdir:Path):
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
             config = cast(dict[str, object],json.load(config_handle))
-    
-    ndir = Path(args.change_base_directory).resolve()
-    if ndir:
-        os.mkdir(ndir)
-        config[CONFIG_BASE_DIR_NAME] = ndir
+    if args.change_base_directory:
+        ndir = Path(args.change_base_directory).resolve()
+        if ndir:
+            os.mkdir(ndir)
+            config[CONFIG_BASE_DIR_NAME] = str(ndir)
     
     base_dir = Path(str(config[CONFIG_BASE_DIR_NAME])).resolve()
     
     if args.print_base_directory:
         print(f"BASE DIRECTORY: {base_dir}")
+    if args.list_journals:
+            print(f"LISTING JOURNALS...\n{list_journals(base_dir)}");
 
     jname = args.journal_name
     if jname:
@@ -362,8 +364,6 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
             print(f"LISTING BACKUPS ON JOURNAL: {jname}...\n{list_backups(jdir)}")
         if args.list_entries:
             print(f"LISTING ENTRIES ON JOURNAL: {jname}...\n{list_entries(jdir)}")
-        if args.list_journals:
-            print(f"LISTING JOURNALS...\n{list_journals(base_dir)}");
         if args.get_entry:
             print(f"{get_entry(jdir, args.get_entry)}")
         if args.list_prompts:
@@ -388,29 +388,20 @@ if __name__ == "__main__":
     
     fdir = Path(__file__).resolve().parent
     config_path = fdir/"config.json"
-    fallback_base_dir = config_path/".data"
+    fallback_base_dir = fdir/".data"
 
-    config = None
-    with open(config_path, "w") as f:
-        if not config_path.exists():
-            f.write(f"""
-                    {{
-                        {CONFIG_BASE_DIR_NAME}: {fallback_base_dir},
-                    }}
-                    """)
-            os.mkdir(fallback_base_dir)
-        else:
+    if config_path.exists():
+        with open(config_path, "r") as f:
             config = json.load(f)
-            if not config[CONFIG_BASE_DIR_NAME]:
-                f.write(f"""
-                    {{
-                        {CONFIG_BASE_DIR_NAME}: {fallback_base_dir},
-                    }}
-                    """)
-                os.mkdir(fallback_base_dir)   
-    
-    base_dir:str = argument_handler(args, f, config)
-    f.close()
+    else:
+        config = {}
+
+    if not config.get(CONFIG_BASE_DIR_NAME):
+        os.makedirs(fallback_base_dir, exist_ok=True)
+        config[CONFIG_BASE_DIR_NAME] = str(fallback_base_dir)
+
+    with open(config_path, "w") as f:
+        base_dir: str = argument_handler(args, f, config)
 
     
 

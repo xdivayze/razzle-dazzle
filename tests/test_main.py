@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -80,6 +81,88 @@ class TestAddArguments(unittest.TestCase):
         self.assertEqual(args.change_base_directory, "/some/dir")
         self.assertEqual(args.remove_entry, "entry123")
         self.assertEqual(args.revert_to_backup, "backup456")
+
+
+class TestArgumentHandler(TempDirTestCase):
+    def _make_args(self, argv):
+        parser = argparse.ArgumentParser()
+        main.add_arguments(parser)
+        return parser.parse_args(argv)
+
+    def test_no_flags_does_not_crash_without_change_base_directory(self):
+        args = self._make_args([])
+        config = {main.CONFIG_BASE_DIR_NAME: str(self.tmpdir)}
+        fh = io.StringIO()
+
+        result = main.argument_handler(args, fh, config)
+        self.assertEqual(result, str(self.tmpdir.resolve()))
+
+    def test_list_journals_without_journal_name_does_not_crash(self):
+        new_journal_with_input(self.tmpdir, "j1", ["END"])
+        args = self._make_args(["--list-journals"])
+        config = {main.CONFIG_BASE_DIR_NAME: str(self.tmpdir)}
+        fh = io.StringIO()
+
+        result = main.argument_handler(args, fh, config)
+        self.assertEqual(result, str(self.tmpdir.resolve()))
+
+    def test_change_base_directory_creates_dir_and_persists_as_string(self):
+        newdir = self.tmpdir / "newbase"
+        args = self._make_args(["--change-base-directory", str(newdir)])
+        config = {main.CONFIG_BASE_DIR_NAME: str(self.tmpdir)}
+        fh = io.StringIO()
+
+        result = main.argument_handler(args, fh, config)
+
+        self.assertTrue(newdir.exists())
+        self.assertEqual(result, str(newdir.resolve()))
+
+        fh.seek(0)
+        written_config = json.load(fh)
+        self.assertEqual(written_config[main.CONFIG_BASE_DIR_NAME], str(newdir.resolve()))
+
+
+class TestMainBootstrap(unittest.TestCase):
+    """Exercises the `if __name__ == "__main__":` config bootstrap via subprocess,
+    since it's inline script code rather than a callable function."""
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        shutil.copy(Path(main.__file__), self.tmpdir / "main.py")
+
+    def _run(self, args):
+        return subprocess.run(
+            [sys.executable, str(self.tmpdir / "main.py"), *args],
+            capture_output=True, text=True, input="END\n", timeout=10,
+        )
+
+    def test_first_run_creates_valid_config(self):
+        result = self._run(["--print-base-directory"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        with open(self.tmpdir / "config.json") as f:
+            config = json.load(f)
+
+        data_dir = Path(config[main.CONFIG_BASE_DIR_NAME])
+        self.assertTrue(data_dir.is_dir())
+        self.assertEqual(data_dir.parent, self.tmpdir)
+
+    def test_second_run_reuses_existing_config(self):
+        first = self._run(["--print-base-directory"])
+        self.assertEqual(first.returncode, 0, first.stderr)
+
+        second = self._run(["--print-base-directory"])
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(first.stdout, second.stdout)
+
+    def test_new_and_list_journals_round_trip(self):
+        new_result = self._run(["--new", "myjournal"])
+        self.assertEqual(new_result.returncode, 0, new_result.stderr)
+
+        list_result = self._run(["--list-journals"])
+        self.assertEqual(list_result.returncode, 0, list_result.stderr)
+        self.assertIn("myjournal", list_result.stdout)
 
 
 class TestNewJournal(TempDirTestCase):
@@ -342,12 +425,21 @@ class TestRemoveJournal(TempDirTestCase):
         main.remove_journal(jdir)
         self.assertFalse(jdir.exists())
 
-    def test_raises_if_journal_dir_not_empty(self):
+    def test_removes_journal_with_contents(self):
         jdir = self.tmpdir / "myjournal"
         jdir.mkdir()
         (jdir / "data.csv").touch()
-        with self.assertRaises(OSError):
-            main.remove_journal(jdir)
+        main.remove_journal(jdir)
+        self.assertFalse(jdir.exists())
+
+    def test_removes_real_journal_created_via_new_journal(self):
+        new_journal_with_input(self.tmpdir, "myjournal", ["how was your day", "str", "END"])
+        jdir = self.tmpdir / "myjournal"
+        new_entry_with_input(jdir, ["good day"])
+        main.backup(jdir)
+
+        main.remove_journal(jdir)
+        self.assertFalse(jdir.exists())
 
 
 class TestBackup(TempDirTestCase):
