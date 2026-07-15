@@ -34,7 +34,7 @@ def add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--backup", action="store_true", help="create a back up of the provided journal")
     parser.add_argument("--new-entry", action="store_true", help="insert a new entry to the journal")
     parser.add_argument("--remove-journal", action="store_true", help="remove the specified journal and delete its contents")
-    parser.add_argument("--add-prompt", action="store_true", help="prompts user to add a new prompt to the journal")
+    parser.add_argument("--add-prompt", action="store_true", help="Prompts user to add a new prompt to the journal. All old entries are converted to falsy values for that column")
 
     #prints stuff
     parser.add_argument("--list-backups", action="store_true", help="list the backups for journal")
@@ -271,6 +271,16 @@ def get_entry(jdir: Path, id: str)->dict[str, str]:
     return df.iloc[0].to_dict()
 
 
+def list_prompts(jdir: Path)->list[dict[str, str]]:
+    jdir_definitions = jdir/DEFINITIONS_JSON_NAME
+    if not jdir_definitions.exists():
+        raise Exception("journal directory doesn't have definitions file")
+
+    with open(jdir_definitions, "r") as f:
+        jdef = json.load(f)
+
+    return jdef.get(DEFINITIONS_PROMPTS_FIELDNAME)
+
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
             config = cast(dict[str, object],json.load(config_handle))
@@ -314,7 +324,7 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
         if args.get_entry:
             print(f"{get_entry(jdir, args.get_entry)}")
         if args.list_prompts:
-            pass #TODO
+            print(f"LISTING PROMPTS ON JOURNAL: {jname}...\n{list_prompts(jdir)}")
         if args.add_prompt:
             pass #TODO
     if args.new:

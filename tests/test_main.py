@@ -291,6 +291,50 @@ class TestListBackups(TempDirTestCase):
             self.assertCountEqual(entry.keys(), ["id", "hash", "date"])
 
 
+class TestListPrompts(TempDirTestCase):
+    def test_raises_if_definitions_file_missing(self):
+        jdir = self.tmpdir / "myjournal"
+        jdir.mkdir()
+        with self.assertRaises(Exception):
+            main.list_prompts(jdir)
+
+    def test_returns_prompts_field(self):
+        jdir = self.tmpdir / "myjournal"
+        jdir.mkdir()
+        prompts = [{"prompt": "how was your day", "dtype": "str"}]
+        with open(jdir / main.DEFINITIONS_JSON_NAME, "w") as f:
+            json.dump({main.DEFINITIONS_PROMPTS_FIELDNAME: prompts}, f)
+        result = main.list_prompts(jdir)
+        self.assertIsInstance(result, list)
+        self.assertEqual(result, prompts)
+        for prompt in result:
+            self.assertIsInstance(prompt, dict)
+            self.assertCountEqual(prompt.keys(), ["prompt", "dtype"])
+
+    def test_returns_empty_list_for_journal_with_no_prompts(self):
+        new_journal_with_input(self.tmpdir, "myjournal", ["END"])
+        jdir = self.tmpdir / "myjournal"
+
+        result = main.list_prompts(jdir)
+        self.assertIsInstance(result, list)
+        self.assertEqual(result, [])
+
+    def test_returns_prompts_for_journal_with_prompts(self):
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["how was your day", "str", "hours slept", "int", "END"],
+        )
+        jdir = self.tmpdir / "myjournal"
+
+        self.assertEqual(
+            main.list_prompts(jdir),
+            [
+                {"prompt": "how was your day", "dtype": "str"},
+                {"prompt": "hours slept", "dtype": "int"},
+            ],
+        )
+
+
 class TestRemoveJournal(TempDirTestCase):
     def test_removes_empty_journal_dir(self):
         jdir = self.tmpdir / "myjournal"
