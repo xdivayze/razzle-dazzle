@@ -698,5 +698,64 @@ class TestRemoveEntry(TempDirTestCase):
         self.assertEqual([e["id"] for e in main.list_entries(jdir)], ["9876543210"])
 
 
+class TestGetEntry(TempDirTestCase):
+    def setUp(self):
+        super().setUp()
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["how was your day", "str", "hours slept", "int", "END"],
+        )
+        self.jdir = self.tmpdir / "myjournal"
+        new_entry_with_input(self.jdir, ["good day", "8"])
+        new_entry_with_input(self.jdir, ["bad day", "3"])
+
+        entries = main.list_entries(self.jdir)
+        self.first = entries[0]
+        self.second = entries[1]
+
+    def test_returns_matching_entry_data(self):
+        result = main.get_entry(self.jdir, self.first["id"])
+
+        self.assertEqual(result["id"], self.first["id"])
+        self.assertEqual(result["date"], self.first["date"])
+        self.assertEqual(result["how was your day"], "good day")
+        self.assertEqual(result["hours slept"], 8)
+
+    def test_returns_correct_entry_among_multiple(self):
+        result = main.get_entry(self.jdir, self.second["id"])
+
+        self.assertEqual(result["id"], self.second["id"])
+        self.assertEqual(result["how was your day"], "bad day")
+        self.assertEqual(result["hours slept"], 3)
+
+    def test_raises_if_entry_does_not_exist(self):
+        with self.assertRaises(Exception):
+            main.get_entry(self.jdir, "doesnotexist")
+
+    def test_does_not_mutate_csv_or_definitions_json(self):
+        with open(self.jdir / main.DATA_CSV_NAME, newline="") as f:
+            csv_before = f.read()
+        entries_before = main.list_entries(self.jdir)
+
+        main.get_entry(self.jdir, self.first["id"])
+
+        with open(self.jdir / main.DATA_CSV_NAME, newline="") as f:
+            csv_after = f.read()
+        self.assertEqual(csv_after, csv_before)
+        self.assertEqual(main.list_entries(self.jdir), entries_before)
+
+    def test_raises_on_definitions_csv_mismatch(self):
+        main.remove_entry(self.jdir, self.first["id"])
+
+        with open(self.jdir / main.DEFINITIONS_JSON_NAME) as f:
+            defs = json.load(f)
+        defs[main.DEFINITIONS_ENTRIES_FIELDNAME].append(self.first)
+        with open(self.jdir / main.DEFINITIONS_JSON_NAME, "w") as f:
+            json.dump(defs, f)
+
+        with self.assertRaises(ValueError):
+            main.get_entry(self.jdir, self.first["id"])
+
+
 if __name__ == "__main__":
     unittest.main()

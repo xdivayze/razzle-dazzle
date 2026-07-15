@@ -255,8 +255,20 @@ def remove_entry(jdir: Path, id: str):
     with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump(jdef, f)
 
-def get_entry(jdir: Path, id: str):
-    raise NotImplementedError
+def get_entry(jdir: Path, id: str)->dict[str, str]:
+    with open(jdir/DEFINITIONS_JSON_NAME, "r") as f:
+        jdef = json.load(f)
+
+    entries = jdef[DEFINITIONS_ENTRIES_FIELDNAME]
+    if not any(item["id"] == id for item in entries):
+        raise Exception("entry doesn't exist")
+
+    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={"id": str})
+    df = df[df['id'] == id]
+    if df.empty:
+        raise ValueError("mismatch between definitions.json and data file detected.")
+
+    return df.iloc[0].to_dict()
 
 
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
@@ -300,7 +312,7 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
         if args.list_journals:
             print(f"LISTING JOURNALS...\n{list_journals(base_dir)}");
         if args.get_entry:
-            pass #TODO
+            print(f"{get_entry(jdir, args.get_entry)}")
         if args.list_prompts:
             pass #TODO
         if args.add_prompt:
