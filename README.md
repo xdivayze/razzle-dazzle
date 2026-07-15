@@ -126,9 +126,9 @@ existing row (backfilled blank) and to future entries.
 
 Positional argument:
 
-| Argument       | Description                                                              |
-|----------------|----------------------------------------------------------------------------|
-| `journal_name` | Optional. Required by every flag below marked "yes" in *Needs journal*.   |
+| Argument       | Description                                                                     |
+|----------------|-----------------------------------------------------------------------------------|
+| `journal_name` | Optional. Required by every flag in the two "Journal-scoped" tables below.        |
 
 No journal name required:
 
