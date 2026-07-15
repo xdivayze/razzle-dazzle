@@ -13,9 +13,16 @@ import pandas as pd
 
 CONFIG_BASE_DIR_NAME = "base_directory"
 
+#field names shared by prompt/entry/backup records and the data.csv columns
+ID_FIELDNAME = "id"
+DATE_FIELDNAME = "date"
+HASH_FIELDNAME = "hash"
+PROMPT_QUESTION_FIELDNAME = "prompt"
+PROMPT_DTYPE_FIELDNAME = "dtype"
+
 DEFINITIONS_JSON_NAME = "definitions.json"
 DEFINITIONS_NAME_FIELDNAME = "name"
-DEFINITIONS_ID_FIELDNAME = "id"
+DEFINITIONS_ID_FIELDNAME = ID_FIELDNAME
 DEFINITIONS_PROMPTS_FIELDNAME = "prompts"
 DEFINITIONS_ENTRIES_FIELDNAME = "entries"
 DEFINITIONS_BACKUPS_FIELDNAME = "backups"
@@ -82,12 +89,12 @@ def new_journal(dir: Path, journal_name: str):
             print("type invalid, skipping...", file=sys.stderr)
             continue
 
-        prompts.append({"prompt": nprompt, "dtype":prompt_t})
+        prompts.append({PROMPT_QUESTION_FIELDNAME: nprompt, PROMPT_DTYPE_FIELDNAME: prompt_t})
 
 
     with open(dir/DATA_CSV_NAME, "w", newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["id", "date"] + [p["prompt"] for p in prompts])
+        writer.writerow([ID_FIELDNAME, DATE_FIELDNAME] + [p[PROMPT_QUESTION_FIELDNAME] for p in prompts])
 
     with open(dir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump({
@@ -155,7 +162,7 @@ def backup (jdir:Path)-> dict[str, str]:
     with open(jdir/DEFINITIONS_JSON_NAME, "r") as f:
         defs = json.load(f)
 
-    backup_details = {"id": backup_id, "hash": hashsum, "date": dt.datetime.now().isoformat()}
+    backup_details = {ID_FIELDNAME: backup_id, HASH_FIELDNAME: hashsum, DATE_FIELDNAME: dt.datetime.now().isoformat()}
     defs[DEFINITIONS_BACKUPS_FIELDNAME].append(backup_details)
 
 
@@ -185,7 +192,7 @@ def revert_to_backup(backup_id: str, jdir: Path):
     with open(bcsv, "rb") as f:
         bhash = hashlib.file_digest(f, "sha256").hexdigest()
 
-    if (bhash != bdef_json["hash"]):
+    if (bhash != bdef_json[HASH_FIELDNAME]):
         raise Exception("corrupted backup file")
 
     shutil.copy(bcsv, jcsv)
@@ -210,8 +217,8 @@ def new_entry(jdir: Path):
     prompts: list[dict[str, str]] = jdef_json.get(DEFINITIONS_PROMPTS_FIELDNAME)
     answers: list[str] = list()
     for prompt_entry in prompts:
-        p = prompt_entry["prompt"]
-        dtype = prompt_entry["dtype"]
+        p = prompt_entry[PROMPT_QUESTION_FIELDNAME]
+        dtype = prompt_entry[PROMPT_DTYPE_FIELDNAME]
         ans = input(p).strip()
         dtype_found = TYPES.get(dtype)
         if not dtype_found:
@@ -234,7 +241,7 @@ def new_entry(jdir: Path):
         writer = csv.writer(f)
         writer.writerow(answers)
 
-    jdef_json[DEFINITIONS_ENTRIES_FIELDNAME].append({"id":entry_id, "date":entry_date})
+    jdef_json[DEFINITIONS_ENTRIES_FIELDNAME].append({ID_FIELDNAME:entry_id, DATE_FIELDNAME:entry_date})
     
     with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump(jdef_json, f)
@@ -244,14 +251,14 @@ def remove_entry(jdir: Path, id: str):
         jdef = json.load(f)
 
     entries = jdef[DEFINITIONS_ENTRIES_FIELDNAME]
-    if not any(item["id"] == id for item in entries):
+    if not any(item[ID_FIELDNAME] == id for item in entries):
         raise Exception("entry doesn't exist")
 
-    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={"id": str})
-    df = df[df['id'] != id]
+    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={ID_FIELDNAME: str})
+    df = df[df[ID_FIELDNAME] != id]
     df.to_csv(jdir/DATA_CSV_NAME, index=False)
 
-    jdef[DEFINITIONS_ENTRIES_FIELDNAME] = [item for item in entries if item["id"] != id]
+    jdef[DEFINITIONS_ENTRIES_FIELDNAME] = [item for item in entries if item[ID_FIELDNAME] != id]
     with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump(jdef, f)
 
@@ -260,11 +267,11 @@ def get_entry(jdir: Path, id: str)->dict[str, str]:
         jdef = json.load(f)
 
     entries = jdef[DEFINITIONS_ENTRIES_FIELDNAME]
-    if not any(item["id"] == id for item in entries):
+    if not any(item[ID_FIELDNAME] == id for item in entries):
         raise Exception("entry doesn't exist")
 
-    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={"id": str})
-    df = df[df['id'] == id]
+    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={ID_FIELDNAME: str})
+    df = df[df[ID_FIELDNAME] == id]
     if df.empty:
         raise ValueError("mismatch between definitions.json and data file detected.")
 
@@ -299,12 +306,12 @@ def add_prompt(jdir:Path):
             print("type invalid, skipping...", file=sys.stderr)
             continue
 
-        prompts.append({"prompt": nprompt, "dtype":prompt_t})
+        prompts.append({PROMPT_QUESTION_FIELDNAME: nprompt, PROMPT_DTYPE_FIELDNAME: prompt_t})
 
-    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={"id": str})
+    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={ID_FIELDNAME: str})
 
     for p in prompts:
-        prompt = p["prompt"]
+        prompt = p[PROMPT_QUESTION_FIELDNAME]
         df[prompt] = pd.NA
 
     df.to_csv(jdir/DATA_CSV_NAME, index=False)
@@ -345,7 +352,7 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
             print(f"REMOVED ENTRY {args.remove_entry}")
         if args.backup:
             defs = backup(jdir)
-            print(f"CREATED NEW BACKUP FOR JOURNAL:{jname}\nid:{defs.get("id")} hash:{defs.get("hash")} date:{defs.get("date")}")
+            print(f"CREATED NEW BACKUP FOR JOURNAL:{jname}\nid:{defs.get(ID_FIELDNAME)} hash:{defs.get(HASH_FIELDNAME)} date:{defs.get(DATE_FIELDNAME)}")
         if args.new_entry:
             new_entry(jdir)
             print(f"ADDED NEW ENTRY TO JOURNAL: {jname}")
