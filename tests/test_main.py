@@ -604,5 +604,97 @@ class TestNewEntry(TempDirTestCase):
         self.assertEqual(rows[1][0], main.list_entries(jdir)[0]["id"])
 
 
+class TestRemoveEntry(TempDirTestCase):
+    def setUp(self):
+        super().setUp()
+        new_journal_with_input(
+            self.tmpdir, "myjournal",
+            ["how was your day", "str", "END"],
+        )
+        self.jdir = self.tmpdir / "myjournal"
+        new_entry_with_input(self.jdir, ["good day"])
+        new_entry_with_input(self.jdir, ["bad day"])
+
+        entries = main.list_entries(self.jdir)
+        self.first_id = entries[0]["id"]
+        self.second_id = entries[1]["id"]
+
+    def _csv_rows(self):
+        with open(self.jdir / main.DATA_CSV_NAME, newline="") as f:
+            return list(csv.reader(f))
+
+    def test_raises_if_entry_does_not_exist(self):
+        with self.assertRaises(Exception):
+            main.remove_entry(self.jdir, "doesnotexist")
+
+    def test_does_not_mutate_anything_if_entry_does_not_exist(self):
+        rows_before = self._csv_rows()
+        entries_before = main.list_entries(self.jdir)
+
+        with self.assertRaises(Exception):
+            main.remove_entry(self.jdir, "doesnotexist")
+
+        self.assertEqual(self._csv_rows(), rows_before)
+        self.assertEqual(main.list_entries(self.jdir), entries_before)
+
+    def test_removes_row_from_csv(self):
+        main.remove_entry(self.jdir, self.first_id)
+
+        rows = self._csv_rows()
+        ids = [row[0] for row in rows[1:]]
+        self.assertEqual(ids, [self.second_id])
+
+    def test_removes_entry_from_definitions_json(self):
+        main.remove_entry(self.jdir, self.first_id)
+
+        entries = main.list_entries(self.jdir)
+        self.assertEqual([e["id"] for e in entries], [self.second_id])
+
+    def test_leaves_other_entries_untouched(self):
+        main.remove_entry(self.jdir, self.first_id)
+
+        rows = self._csv_rows()
+        self.assertEqual(rows[0], ["id", "how was your day"])
+        self.assertEqual(rows[1][1], "bad day")
+
+    def test_removing_last_entry_leaves_header_only_csv(self):
+        main.remove_entry(self.jdir, self.first_id)
+        main.remove_entry(self.jdir, self.second_id)
+
+        self.assertEqual(self._csv_rows(), [["id", "how was your day"]])
+        self.assertEqual(main.list_entries(self.jdir), [])
+
+    def test_removes_row_with_purely_numeric_id(self):
+        # Regression: pandas infers an all-digit id column as int64, so
+        # comparing against a string id would silently match nothing
+        # unless the id column is explicitly read back as strings.
+        jdir = self.tmpdir / "numeric_ids"
+        jdir.mkdir()
+        (jdir / main.BACKUPS_DIR_NAME).mkdir()
+        with open(jdir / main.DATA_CSV_NAME, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "note"])
+            writer.writerow(["1234567890", "first"])
+            writer.writerow(["9876543210", "second"])
+        with open(jdir / main.DEFINITIONS_JSON_NAME, "w") as f:
+            json.dump({
+                main.DEFINITIONS_NAME_FIELDNAME: "numeric_ids",
+                main.DEFINITIONS_ID_FIELDNAME: "jid",
+                main.DEFINITIONS_PROMPTS_FIELDNAME: [],
+                main.DEFINITIONS_ENTRIES_FIELDNAME: [
+                    {"id": "1234567890", "date": "2026-01-01"},
+                    {"id": "9876543210", "date": "2026-01-02"},
+                ],
+                main.DEFINITIONS_BACKUPS_FIELDNAME: [],
+            }, f)
+
+        main.remove_entry(jdir, "1234567890")
+
+        with open(jdir / main.DATA_CSV_NAME, newline="") as f:
+            rows = list(csv.reader(f))
+        self.assertEqual(rows, [["id", "note"], ["9876543210", "second"]])
+        self.assertEqual([e["id"] for e in main.list_entries(jdir)], ["9876543210"])
+
+
 if __name__ == "__main__":
     unittest.main()

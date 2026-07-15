@@ -9,6 +9,7 @@ import json
 import os
 import uuid
 from pathlib import Path
+import pandas as pd
 
 CONFIG_BASE_DIR_NAME = "base_directory"
 
@@ -235,7 +236,21 @@ def new_entry(jdir: Path):
     with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
         json.dump(jdef_json, f)
 
-        
+def remove_entry(jdir: Path, id: str):
+    with open(jdir/DEFINITIONS_JSON_NAME, "r") as f:
+        jdef = json.load(f)
+
+    entries = jdef[DEFINITIONS_ENTRIES_FIELDNAME]
+    if not any(item["id"] == id for item in entries):
+        raise Exception("entry doesn't exist")
+
+    df = pd.read_csv(jdir/DATA_CSV_NAME, dtype={"id": str})
+    df = df[df['id'] != id]
+    df.to_csv(jdir/DATA_CSV_NAME, index=False)
+
+    jdef[DEFINITIONS_ENTRIES_FIELDNAME] = [item for item in entries if item["id"] != id]
+    with open(jdir/DEFINITIONS_JSON_NAME, "w") as f:
+        json.dump(jdef, f)
 
 def argument_handler( args, config_handle: IO[str], config: dict[str, object]| None ):
     if config is None:
@@ -261,7 +276,8 @@ def argument_handler( args, config_handle: IO[str], config: dict[str, object]| N
             revert_to_backup(args.revert_to_backup.strip(), jdir)
             print(f"REVERTED JOURNAL {jname} TO {args.revert_to_backup}")
         if args.remove_entry:
-            pass
+            remove_entry(jdir, args.remove_entry)
+            print(f"REMOVED ENTRY {args.remove_entry}")
         if args.backup:
             defs = backup(jdir)
             print(f"CREATED NEW BACKUP FOR JOURNAL:{jname}\nid:{defs.get("id")} hash:{defs.get("hash")} date:{defs.get("date")}")
